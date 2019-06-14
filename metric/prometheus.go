@@ -266,7 +266,7 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 	var value string
 	var errorSIP = regexp.MustCompile(`[456]..`)
 	keyCallID1 := "IMS_CallID:"+tnNew+pkt.SIP.CallID
-	LongTimer = "43200"
+	LongTimer := "43200"
 	
 	if pkt.SIP.FirstMethod == "INVITE" {
 		//logp.Info("SIP INVITE message callid: %v", pkt.SIP.CallID)
