@@ -14,8 +14,9 @@ import (
 	"github.com/negbie/logp"
 	"github.com/sipcapture/heplify-server/config"
 	"github.com/sipcapture/heplify-server/decoder"
-	"github.com/coocood/freecache"
+	//"github.com/coocood/freecache"
 	"github.com/muesli/cache2go"
+	"github.com/mediocregopher/radix"
 	
 )
 
@@ -32,19 +33,43 @@ type Prometheus struct {
 	TargetMap   map[string]string
 	TargetConf  *sync.RWMutex
 	cache       *fastcache.Cache
-	CacheIMS         *freecache.Cache
-	CacheIMSReg		 *freecache.Cache
+	//CacheIMS         *freecache.Cache
+	//CacheIMSReg		 *freecache.Cache
 }
 
 func (p *Prometheus) setup() (err error) {
+	//default connected will be DB 0
+	p.RedisPool,err = radix.NewPool("tcp","localhost:6379",10)
+	if err != nil {
+			logp.Err("RedisPool: %v", err)
+	} else {
+		logp.Info("RedisPool Connected")
+	}
+	
+	// this is a ConnFunc which will set up a connection
+	// and has a 1 minute timeout on all operations
+	//OnlineConnFunc := func(network, addr string) (radix.Conn, error) {
+	//	return radix.Dial(network, addr,
+	//		radix.DialTimeout(1 * time.Minute),
+	//		radix.DialSelectDB(1),
+	//	)
+	//}
+	
+	//OnlinePool,err = radix.NewPool("tcp","localhost:6379",10, PoolConnFunc(OnlineConnFunc))
+	//if err != nil {
+	//		logp.Err("OnlinePool: %v", err)
+	//} else {
+	//	logp.Info("OnlinePool Connected")
+	//}
+
 	p.TargetConf = new(sync.RWMutex)
 	p.TargetIP = strings.Split(cutSpace(config.Setting.PromTargetIP), ",")
 	p.TargetName = strings.Split(cutSpace(config.Setting.PromTargetName), ",")
 	p.cache = fastcache.New(cacheSize)
 	
 	//new
-	p.CacheIMS = freecache.NewCache(80 * 1024 * 1024)
-	p.CacheIMSReg = freecache.NewCache(80 * 1024 * 1024)
+	//p.CacheIMS = freecache.NewCache(80 * 1024 * 1024)
+	//p.CacheIMSReg = freecache.NewCache(80 * 1024 * 1024)
 	
 	//new
 	if p.TargetIP[0] != "" && p.TargetName[0] != "" {
@@ -238,21 +263,28 @@ func (p *Prometheus) checkTargetPrefix(pkt *decoder.HEP) {
 
 	
 func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP string) {
+	var value string
 	var errorSIP = regexp.MustCompile(`[456]..`)
+	keyCallID1 := "IMS_CallID:"+tnNew+pkt.SIP.CallID
+	LongTimer = "43200"
 	
 	if pkt.SIP.FirstMethod == "INVITE" {
 		//logp.Info("SIP INVITE message callid: %v", pkt.SIP.CallID)
-		_, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
+		err := p.RedisPool.Do(radix.Cmd(nil, "GET", keyCallID1))
+		//_, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
 		if err != nil {
-			_ = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("INVITE"), 43200)
+			_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyCallID1, LongTimer, "INVITE"))
+			//_ = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("INVITE"), 43200)
 			heplify_SIP_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "SC.AttSession").Inc()
 			//logp.Info("%v----> INVITE message added to cache", tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.CallID)
 		}
 	} else if pkt.SIP.FirstMethod == "CANCEL" {
-		value,err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
+		err := p.RedisPool.Do(radix.Cmd(&value, "GET", keyCallID1))
+		//value,err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
 		if err == nil {
-			if bytes.Equal(value, []byte("INVITE")){
-				_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
+			if value == "INVITE"{
+				_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyCallID1))
+				//_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
 				heplify_SIP_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "SC.RelBeforeRing").Inc()
 			}
 		} else {
@@ -261,10 +293,12 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 	} else if pkt.SIP.FirstMethod == "BYE" {
 		//check if the call has been answer or not. If not answer then dont need to update just delete the cache.
 		//if dont have this check will cause AccumulatedCallDuration to be very big because start time is 0.
-		value, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
+		err := p.RedisPool.Do(radix.Cmd(&value, "GET", keyCallID1))
+		//value, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
 		if err == nil {
-			_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
-			if bytes.Equal(value, []byte("ANSWERED")){
+			_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyCallID1))
+			//_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
+			if value == "ANSWERED" {
 				//new
 				cache2goGot, err2 := cache2go.Cache(tnNew+peerIP).Value(pkt.SIP.CallID)
 				if err2 != nil {
@@ -284,19 +318,22 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 			//logp.Warn("BYE not found err:%v tnNew:%v cid:%v", err,tnNew,pkt.SIP.CallID)
 		}
 	} else if pkt.SIP.CseqMethod == "INVITE" {
-		value, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
-		if err == nil && !bytes.Equal(value, []byte("ANSWERED")) {
-			if bytes.Equal(value, []byte("INVITE")){
+		err := p.RedisPool.Do(radix.Cmd(&value, "GET", keyCallID1))
+		//value, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
+		if err == nil && !(value == "ANSWERED") {
+			if value == "INVITE"{
 				switch pkt.SIP.FirstMethod {
 				case "180":
-					err = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("RINGING"), 43200)
+					err = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyCallID1, LongTimer, "RINGING"))
+					//err = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("RINGING"), 43200)
 					if err != nil {
 						logp.Warn("Line 305 %v", err)
 					}
 					heplify_SIP_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "SC.SuccSession").Inc()
 					//logp.Info("----> 180 RINGING found")
 				case "200":
-					err = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("ANSWERED"), 43200)
+					err = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyCallID1, LongTimer, "ANSWERED"))
+					//err = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("ANSWERED"), 43200)
 					if err != nil {
 						logp.Warn("Line 313 %v", err)
 					}
@@ -311,17 +348,20 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 				case "486", "600", "404", "484":
 					//found some miscalculation because of user already ringing but later reject the call. INVITE sent, 180 receive and after a while 486 receive due to reject of call.
 					//because of this 180 counted as SC.SuccSession then 486 counted as SC.FailSessionUser, this cause NER to be calculated wrongly
-					_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
+					_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyCallID1))
+					//_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
 					heplify_SIP_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "SC.FailSessionUser").Inc()
 					heplify_SIPCallErrorResponse.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, pkt.SIP.FirstMethod).Inc()
 				default:
 					if errorSIP.MatchString(pkt.SIP.FirstMethod){
-						_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
+						_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyCallID1))
+						//_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
 						heplify_SIPCallErrorResponse.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, pkt.SIP.FirstMethod).Inc()
 					}
 				}
-			} else if pkt.SIP.FirstMethod == "200" && bytes.Equal(value, []byte("RINGING")){
-				err = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("ANSWERED"), 43200)
+			} else if pkt.SIP.FirstMethod == "200" && value == "RINGING" {
+				err = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyCallID1, LongTimer, "ANSWERED"))
+				//err = p.CacheIMS.Set([]byte(tnNew+pkt.SIP.CallID), []byte("ANSWERED"), 43200)
 				if err != nil {
 					logp.Warn("%v", err)
 				}
@@ -340,50 +380,62 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 
 
 func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
+	var value string
 	var errorSIP = regexp.MustCompile(`[456]..`)
-	SIPRegSessionTimer := 1800
-	SIPRegTryTimer := 180
+	SIPRegSessionTimer := "1800"
+	SIPRegTryTimer := "180"
+	keyReg1 := "IMSReg:"+tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser
 
 	if pkt.SIP.FirstMethod == "REGISTER" {
-		value, err := p.CacheIMSReg.Get([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser))
+		err := p.RedisPool.Do(radix.Cmd(&value, "GET", keyReg1))
+		//value, err := p.CacheIMSReg.Get([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser))
+		
 		if err != nil {
 			//[]byte("0") means 1st time register
-			_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("0"), SIPRegTryTimer)
+			_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyReg1, SIPRegTryTimer, "0"))
+			//_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("0"), SIPRegTryTimer)
 			heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.1REGAttempt").Inc()
-		} else if (err == nil && bytes.Equal(value, []byte("2"))){
-			if pkt.SIP.Expires=="0"{
+		} else if (err == nil && value == "2"){
+			if pkt.SIP.Expires == "0" {
 				//[]byte("3") means un-register
 				logp.Info("%v is going to un-register. Expires=0", pkt.SIP.FromUser)
-				_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("3"), SIPRegTryTimer)
+				_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyReg1, SIPRegTryTimer, "3"))
+				//_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("3"), SIPRegTryTimer)
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.UNREGAttempt").Inc()
 				
 				cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 			} else {
 				//[]byte("1") means re-register
-				_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("1"), SIPRegTryTimer)
+				_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyReg1, SIPRegTryTimer, "1"))
+				//_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("1"), SIPRegTryTimer)
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.RREGAttempt").Inc()
 			}
 		}		
 	} else if pkt.SIP.CseqMethod == "REGISTER"{
-		value, err := p.CacheIMSReg.Get([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
+		err := p.RedisPool.Do(radix.Cmd(&value, "GET", keyReg1))
+		//value, err := p.CacheIMSReg.Get([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
+		
 		if err == nil {
 			if pkt.SIP.FirstMethod == "200" {
 				cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
 				
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 				
-				if bytes.Equal(value, []byte("0")){
+				if value == "0"{
 					heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "RG.1REGAttemptSuccess").Inc()
 					//[]byte("2") means success register
-					p.CacheIMSReg.Set([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser), []byte("2"), SIPRegSessionTimer)
-				} else if bytes.Equal(value, []byte("1")){
+					_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyReg1, SIPRegSessionTimer, "2"))
+					//p.CacheIMSReg.Set([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser), []byte("2"), SIPRegSessionTimer)
+				} else if value == "1"{
 					heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "RG.RREGAttemptSuccess").Inc()
 					//[]byte("2") means success register
-					p.CacheIMSReg.Set([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser), []byte("2"), SIPRegSessionTimer)
-				} else if bytes.Equal(value, []byte("3")){
+					_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyReg1, SIPRegSessionTimer, "2"))
+					//p.CacheIMSReg.Set([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser), []byte("2"), SIPRegSessionTimer)
+				} else if value == "3"{
 					heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "RG.UNREGAttemptSuccess").Inc()
-					_ = p.CacheIMSReg.Del([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
+					_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyReg1))
+					//_ = p.CacheIMSReg.Del([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
 				}
 			} else if errorSIP.MatchString(pkt.SIP.FirstMethod){
 				heplify_SIPRegisterErrorResponse.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, pkt.SIP.FirstMethod).Inc()
@@ -392,7 +444,8 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 					//do nothing
 				default:
 					cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
-					_ = p.CacheIMSReg.Del([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
+					_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyReg1))
+					//_ = p.CacheIMSReg.Del([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
 				}
 			}
 		}
