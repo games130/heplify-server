@@ -7,7 +7,6 @@ import (
 	"sync"
 	"regexp"
 	"time"
-	"bytes"
 	"strconv"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -16,7 +15,7 @@ import (
 	"github.com/sipcapture/heplify-server/decoder"
 	//"github.com/coocood/freecache"
 	"github.com/muesli/cache2go"
-	"github.com/mediocregopher/radix"
+	"github.com/mediocregopher/radix/v3"
 	
 )
 
@@ -33,6 +32,7 @@ type Prometheus struct {
 	TargetMap   map[string]string
 	TargetConf  *sync.RWMutex
 	cache       *fastcache.Cache
+	RedisPool	*radix.Pool
 	//CacheIMS         *freecache.Cache
 	//CacheIMSReg		 *freecache.Cache
 }
