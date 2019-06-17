@@ -270,7 +270,7 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 	
 	if pkt.SIP.FirstMethod == "INVITE" {
 		//logp.Info("SIP INVITE message callid: %v", pkt.SIP.CallID)
-		_ = p.RedisPool.Do(radix.Cmd(nil, "GET", keyCallID1))
+		_ = p.RedisPool.Do(radix.Cmd(&value, "GET", keyCallID1))
 		//_, err := p.CacheIMS.Get([]byte(tnNew+pkt.SIP.CallID))
 		if value == "" {
 			_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyCallID1, LongTimer, "INVITE"))
