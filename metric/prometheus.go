@@ -37,7 +37,7 @@ type Prometheus struct {
 	RedisPool	*radix.Pool
 	//CacheIMS         *freecache.Cache
 	//CacheIMSReg		 *freecache.Cache
-	hazelClient	*hazelcast.Client
+	hazelClient	hazelcast.Client
 }
 
 func (p *Prometheus) setup() (err error) {
@@ -415,7 +415,7 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				agg, _ := aggregator.Count("this")
 				count, _ := regMap.Aggregate(agg)
 				//cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count.(int)))
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 			} else {
 				//[]byte("1") means re-register
@@ -435,7 +435,7 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				count, _ := regMap.Aggregate(agg)
 				//cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
 				
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count.(int)))
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 				
 				if value == "0"{
