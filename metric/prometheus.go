@@ -75,6 +75,7 @@ func (p *Prometheus) setup() (err error) {
 		fmt.Println(err)
 		return
 	}
+	fmt.Println(p.hazelClient.Name()) // Connects and prints the name of the client
 
 	p.TargetConf = new(sync.RWMutex)
 	p.TargetIP = strings.Split(cutSpace(config.Setting.PromTargetIP), ",")
