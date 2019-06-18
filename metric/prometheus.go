@@ -431,12 +431,15 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 		
 		if value != "" {
 			if pkt.SIP.FirstMethod == "200" {
+				logp.Info("hazelcast: add to hazelcast")
 				regMap.SetWithTTL(tnNew+pkt.SIP.FromUser, "value", 1800*time.Second)
 				agg, _ := aggregator.Count("this")
 				count, _ := regMap.Aggregate(agg)
 				//cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
+				logp.Info("hazelcast: add complete")
 				
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count.(int)))
+				logp.Info("hazelcast: add to prometheus")
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 				
 				if value == "0"{
