@@ -16,6 +16,8 @@ import (
 	//"github.com/coocood/freecache"
 	"github.com/muesli/cache2go"
 	"github.com/mediocregopher/radix/v3"
+	"github.com/hazelcast/hazelcast-go-client"
+	"github.com/hazelcast/hazelcast-go-client/core/aggregator"
 	
 )
 
@@ -35,6 +37,7 @@ type Prometheus struct {
 	RedisPool	*radix.Pool
 	//CacheIMS         *freecache.Cache
 	//CacheIMSReg		 *freecache.Cache
+	hazelClient	*hazelcast.Client
 }
 
 func (p *Prometheus) setup() (err error) {
@@ -61,6 +64,17 @@ func (p *Prometheus) setup() (err error) {
 	//} else {
 	//	logp.Info("OnlinePool Connected")
 	//}
+	
+	
+	//connection to hazelcast
+	config := hazelcast.NewConfig() // We create a config for illustrative purposes.
+                                    // We do not adjust this config. Therefore it has default settings.
+									// config.NetworkConfig().AddAddress("172.17.0.3:5701")
+	hazelClient, err = hazelcast.NewClientWithConfig(config)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	p.TargetConf = new(sync.RWMutex)
 	p.TargetIP = strings.Split(cutSpace(config.Setting.PromTargetIP), ",")
@@ -377,6 +391,8 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 	SIPRegTryTimer := "180"
 	keyRegForward := "IMSReg:"+tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser
 	keyRegBackward := "IMSReg:"+tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser
+	
+	regMap, _ := p.hazelClient.GetMap("REG:"+tnNew)
 
 	if pkt.SIP.FirstMethod == "REGISTER" {
 		_ = p.RedisPool.Do(radix.Cmd(&value, "GET", keyRegForward))
@@ -395,8 +411,12 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				//_ = p.CacheIMSReg.Set([]byte(tnNew+pkt.SrcIP+pkt.DstIP+pkt.SIP.FromUser), []byte("3"), SIPRegTryTimer)
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.UNREGAttempt").Inc()
 				
-				cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
+				regMap.Delete(tnNew+pkt.SIP.FromUser)
+				agg, _ := aggregator.Count("this")
+				count, _ := regMap.Aggregate(agg)
+				//cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
+				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 			} else {
 				//[]byte("1") means re-register
 				_ = p.RedisPool.Do(radix.Cmd(nil, "SETEX", keyRegForward, SIPRegTryTimer, "1"))
@@ -410,9 +430,13 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 		
 		if value != "" {
 			if pkt.SIP.FirstMethod == "200" {
-				cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
+				regMap.SetWithTTL(tnNew+pkt.SIP.FromUser, "value", 1800*time.Second)
+				agg, _ := aggregator.Count("this")
+				count, _ := regMap.Aggregate(agg)
+				//cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
 				
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
+				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 				
 				if value == "0"{
 					heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "RG.1REGAttemptSuccess").Inc()
@@ -435,7 +459,8 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				case "401", "423":
 					//do nothing
 				default:
-					cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
+					regMap.Delete(tnNew+pkt.SIP.FromUser)
+					//cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
 					_ = p.RedisPool.Do(radix.Cmd(nil, "DEL", keyRegBackward))
 					//_ = p.CacheIMSReg.Del([]byte(tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.FromUser))
 				}
