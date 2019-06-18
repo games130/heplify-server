@@ -72,10 +72,10 @@ func (p *Prometheus) setup() (err error) {
 									// config.NetworkConfig().AddAddress("172.17.0.3:5701")
 	p.hazelClient, err = hazelcast.NewClientWithConfig(hazelConfig)
 	if err != nil {
-		fmt.Println(err)
+		logp.Info("hazel error: ", err)
 		return
 	}
-	fmt.Println(p.hazelClient.Name()) // Connects and prints the name of the client
+	logp.Info("connection: ", p.hazelClient.Name()) // Connects and prints the name of the client
 
 	p.TargetConf = new(sync.RWMutex)
 	p.TargetIP = strings.Split(cutSpace(config.Setting.PromTargetIP), ",")
