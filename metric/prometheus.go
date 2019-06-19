@@ -17,7 +17,7 @@ import (
 	"github.com/muesli/cache2go"
 	"github.com/mediocregopher/radix/v3"
 	"github.com/hazelcast/hazelcast-go-client"
-	"github.com/hazelcast/hazelcast-go-client/core/aggregator"
+	//"github.com/hazelcast/hazelcast-go-client/core/aggregator"
 	
 )
 
@@ -438,7 +438,7 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				//cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
 				//logp.Info("hazelcast: add complete")
 				
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count)))
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
 				//logp.Info("hazelcast: add to prometheus")
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 				
