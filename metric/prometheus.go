@@ -413,10 +413,9 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.UNREGAttempt").Inc()
 				
 				regMap.Delete(tnNew+pkt.SIP.FromUser)
-				agg, _ := aggregator.Count("this")
-				count, _ := regMap.Aggregate(agg)
+				var count int32 = regMap.Size()
 				//cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count.(int64)))
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 			} else {
 				//[]byte("1") means re-register
@@ -433,12 +432,11 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 			if pkt.SIP.FirstMethod == "200" {
 				//logp.Info("hazelcast: add to hazelcast")
 				regMap.SetWithTTL(tnNew+pkt.SIP.FromUser, "value", 1800*time.Second)
-				agg, _ := aggregator.Count("this")
-				count, _ := regMap.Aggregate(agg)
+				var count int32 = regMap.Size()
 				//cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
 				//logp.Info("hazelcast: add complete")
 				
-				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count.(int64)))
+				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count)))
 				//logp.Info("hazelcast: add to prometheus")
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
 				
