@@ -14,7 +14,7 @@ import (
 	"github.com/sipcapture/heplify-server/config"
 	"github.com/sipcapture/heplify-server/decoder"
 	//"github.com/coocood/freecache"
-	"github.com/muesli/cache2go"
+	//"github.com/muesli/cache2go"
 	"github.com/mediocregopher/radix/v3"
 	"github.com/hazelcast/hazelcast-go-client"
 	//"github.com/hazelcast/hazelcast-go-client/core/aggregator"
@@ -282,6 +282,9 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 	var errorSIP = regexp.MustCompile(`[456]..`)
 	keyCallID1 := "IMS_CallID:"+tnNew+pkt.SIP.CallID
 	LongTimer := "43200"
+	OnlineTimer := 43200*time.Second
+	onlineMap, _ := p.hazelClient.GetMap("ONLINE:"+tnNew)
+	
 	
 	if pkt.SIP.FirstMethod == "INVITE" {
 		//logp.Info("SIP INVITE message callid: %v", pkt.SIP.CallID)
@@ -315,18 +318,22 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 			//_ = p.CacheIMS.Del([]byte(tnNew+pkt.SIP.CallID))
 			if value == "ANSWERED" {
 				//new
-				cache2goGot, err2 := cache2go.Cache(tnNew+peerIP).Value(pkt.SIP.CallID)
-				if err2 != nil {
+				PreviousUnixTimestamp, _ := onlineMap.Get(pkt.SIP.CallID)
+				//cache2goGot, err2 := cache2go.Cache(tnNew+peerIP).Value(pkt.SIP.CallID)
+				if PreviousUnixTimestamp == nil {
 					logp.Info("ERROR BYE but no start time")
 					logp.Info("END OF CALL,node,%v,from,%v,to,%v,callid,%v", tnNew, pkt.SIP.FromUser, pkt.SIP.ToUser, pkt.SIP.CallID)
 				} else {
-					PreviousUnixTimestamp := cache2goGot.Data().(int64)
 					CurrentUnixTimestamp := time.Now().Unix()
-					cache2go.Cache(tnNew+peerIP).Delete(pkt.SIP.CallID)
-					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(cache2go.Cache(tnNew+peerIP).Count()))
+					onlineMap.Delete(pkt.SIP.CallID)
+					//cache2go.Cache(tnNew+peerIP).Delete(pkt.SIP.CallID)
+					
+					count, _ := onlineMap.Size()
+					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(count))
+					//heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(cache2go.Cache(tnNew+peerIP).Count()))
 					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.CallCounter").Inc()
-					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.AccumulatedCallDuration").Add(float64(CurrentUnixTimestamp-PreviousUnixTimestamp))
-					logp.Info("END OF CALL,node,%v,from,%v,to,%v,callid,%v,start_timestamp,%v,end_timestamp,%v,difference,%v", tnNew, pkt.SIP.FromUser, pkt.SIP.ToUser, pkt.SIP.CallID, PreviousUnixTimestamp, CurrentUnixTimestamp, (CurrentUnixTimestamp-PreviousUnixTimestamp))
+					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.AccumulatedCallDuration").Add(float64(CurrentUnixTimestamp-PreviousUnixTimestamp.(int64)))
+					logp.Info("END OF CALL,node,%v,from,%v,to,%v,callid,%v,start_timestamp,%v,end_timestamp,%v,difference,%v", tnNew, pkt.SIP.FromUser, pkt.SIP.ToUser, pkt.SIP.CallID, PreviousUnixTimestamp, CurrentUnixTimestamp, (CurrentUnixTimestamp-PreviousUnixTimestamp.(int64)))
 				}
 			}
 		} else {
@@ -349,8 +356,13 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 					
 					//new
 					CurrentUnixTimestamp := time.Now().Unix()
-					cache2go.Cache(tnNew+peerIP).Add(pkt.SIP.CallID, 43200*time.Second, CurrentUnixTimestamp)
-					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(cache2go.Cache(tnNew+peerIP).Count()))
+					onlineMap.SetWithTTL(pkt.SIP.CallID, CurrentUnixTimestamp, OnlineTimer)
+					//cache2go.Cache(tnNew+peerIP).Add(pkt.SIP.CallID, 43200*time.Second, CurrentUnixTimestamp)
+					
+					count, _ := onlineMap.Size()
+					heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(count))
+					//heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(cache2go.Cache(tnNew+peerIP).Count()))
+					
 					heplify_SIP_perf_raw.WithLabelValues(tnNew, pkt.DstIP, pkt.SrcIP, "SC.SuccSession").Inc()
 					//logp.Info("----> 200 before ringing")
 					//logp.Info("%v----> INVITE answered", tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.CallID)
@@ -374,8 +386,12 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 				
 				//new
 				CurrentUnixTimestamp := time.Now().Unix()
-				cache2go.Cache(tnNew+peerIP).Add(pkt.SIP.CallID, 43200*time.Second, CurrentUnixTimestamp)
-				heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(cache2go.Cache(tnNew+peerIP).Count()))
+				onlineMap.SetWithTTL(pkt.SIP.CallID, CurrentUnixTimestamp, OnlineTimer)
+				//cache2go.Cache(tnNew+peerIP).Add(pkt.SIP.CallID, 43200*time.Second, CurrentUnixTimestamp)
+				
+				count, _ := onlineMap.Size()
+				heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(count))
+				//heplify_SIP_perf_raw.WithLabelValues(tnNew, "1", peerIP, "SC.OnlineSession").Set(float64(cache2go.Cache(tnNew+peerIP).Count()))
 
 				//logp.Info("%v----> INVITE answered", tnNew+pkt.DstIP+pkt.SrcIP+pkt.SIP.CallID)
 			}
@@ -413,8 +429,7 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.UNREGAttempt").Inc()
 				
 				regMap.Delete(tnNew+pkt.SIP.FromUser)
-				var count int32 
-				count, _ = regMap.Size()
+				count, _ := regMap.Size()
 				//cache2go.Cache(tnNew).Delete(tnNew+pkt.SIP.FromUser)
 				heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(count))
 				//heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, "1", "1", "RG.RegisteredUsers").Set(float64(cache2go.Cache(tnNew).Count()))
@@ -433,8 +448,7 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 			if pkt.SIP.FirstMethod == "200" {
 				//logp.Info("hazelcast: add to hazelcast")
 				regMap.SetWithTTL(tnNew+pkt.SIP.FromUser, "value", 1800*time.Second)
-				var count int32 
-				count, _ = regMap.Size()
+				count, _ := regMap.Size()
 				//cache2go.Cache(tnNew).Add(tnNew+pkt.SIP.FromUser, 1800*time.Second, nil)
 				//logp.Info("hazelcast: add complete")
 				
