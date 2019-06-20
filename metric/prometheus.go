@@ -283,7 +283,7 @@ func (p *Prometheus) ownPerformance(pkt *decoder.HEP, tnNew string, peerIP strin
 	keyCallID1 := "IMS_CallID:"+tnNew+pkt.SIP.CallID
 	LongTimer := "43200"
 	OnlineTimer := 43200*time.Second
-	onlineMap, _ := p.hazelClient.GetMap("ONLINE:"+tnNew)
+	onlineMap, _ := p.hazelClient.GetMap("ONLINE:"+tnNew+peerIP)
 	
 	
 	if pkt.SIP.FirstMethod == "INVITE" {
