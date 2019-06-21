@@ -364,7 +364,7 @@ func (p *Prometheus) regPerformance(pkt *decoder.HEP, tnNew string) {
 			//1st time register (before is 0, now is FirstREG)
 			processMap.SetWithTTL(keyRegForward, "FirstREG", SIPRegTryTimer)
 			heplify_SIP_REG_perf_raw.WithLabelValues(tnNew, pkt.SrcIP, pkt.DstIP, "RG.1REGAttempt").Inc()
-		} else if value == "2"{
+		} else if value == "SuccessREG"{
 			if pkt.SIP.Expires == "0" {
 				//de-register (before is 3, now is DeREG)
 				logp.Info("%v is going to un-register. Expires=0", pkt.SIP.FromUser)
